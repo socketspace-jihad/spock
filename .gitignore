@@ -1,0 +1,18 @@
+# Binary
+spock
+spock-*
+*.exe
+
+# IDE
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage.out

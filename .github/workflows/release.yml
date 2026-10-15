@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          output="spock-${GOOS}-${GOARCH}${ext}"
+          go build -ldflags="-s -w" -o "$output" .
+          echo "artifact=$output" >> "$GITHUB_ENV"
+
+      - name: Package
+        run: |
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            zip "spock-${{ matrix.goos }}-${{ matrix.goarch }}.zip" "${{ env.artifact }}"
+            echo "package=spock-${{ matrix.goos }}-${{ matrix.goarch }}.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "spock-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" "${{ env.artifact }}"
+            echo "package=spock-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spock-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.package }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          prev_tag=$(git tag --sort=-version:refname | head -2 | tail -1)
+          if [ -z "$prev_tag" ]; then
+            echo "body=Initial release" >> "$GITHUB_OUTPUT"
+          else
+            log=$(git log --pretty=format:"- %s" "$prev_tag"..HEAD)
+            echo "body<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$log" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.changelog.outputs.body }}
+          files: artifacts/*
